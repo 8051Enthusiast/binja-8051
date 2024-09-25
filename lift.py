@@ -147,16 +147,24 @@ def modify_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, f) -
     res = f(val)
     return write_operand(il, op, data, addr, res)
 
-def address_label(il: LowLevelILFunction, addr: int) -> LowLevelILLabel:
+def with_jump_dests_as_labels(il: LowLevelILFunction, addresses: list[int], f):
     arch = Architecture['8051']
-    label = il.get_label_for_address(arch, addr)
-    if not label:
-        il.add_label_for_address(arch, addr)
-        label = il.get_label_for_address(arch, addr)
-        il.mark_label(label)
-    return label
+    unresolved_branches = []
+    labels = []
+    for address in addresses:
+        label = il.get_label_for_address(arch, address)
+        if not label:
+            label = LowLevelILLabel()
+            unresolved_branches.append((label, address))
+        labels.append(label)
+    
+    il.append(f(*labels))
 
-def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int) -> ExpressionIndex:
+    for (label, address) in unresolved_branches:
+        il.mark_label(label)
+        il.jump(il.const_pointer(internal_addr_size, address))
+
+def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int):
     match inst.operation:
         case Op.JC | Op.JNC:
             cond = il.flag('C')
@@ -176,11 +184,12 @@ def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int)
         (succ, fail) = (fail, succ)
 
     if inst.operation == Op.JBC:
+        temp = LLIL_TEMP(1)
+        il.append(il.set_reg(1, temp, cond))
+        cond = il.reg(1, temp)
         il.append(write_operand(il, inst.operands[0], data, addr, il.const(1, 0)))
-        
-    succ_label = address_label(il, succ)
-    fail_label = address_label(il, fail)
-    return il.if_expr(cond, succ_label, fail_label)
+
+    with_jump_dests_as_labels(il, [succ, fail], lambda succ, fail: il.if_expr(cond, succ, fail))
 
 
 def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int):
@@ -194,7 +203,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
         case Op.NOP:
             il.append(il.nop())
         case Op.AJMP | Op.LJMP:
-            target = il.const(internal_addr_size, code_addr(inst.operands[-1].const_address(data, addr)))
+            target = il.const_pointer(internal_addr_size, code_addr(inst.operands[-1].const_address(data, addr)))
             il.append(il.jump(target))
         case Op.RR:
             il.append(modify(lambda x: il.rotate_right(1, x, il.const(1, 1))))
@@ -203,7 +212,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
         case Op.DEC:
             il.append(modify(lambda x: il.sub(1, x, il.const(1, 1))))
         case Op.ACALL | Op.LCALL:
-            target = il.const(internal_addr_size, code_addr(inst.operands[-1].const_address(data, addr)))
+            target = il.const_pointer(internal_addr_size, code_addr(inst.operands[-1].const_address(data, addr)))
             il.append(il.call(target))
         case Op.RRC:
             il.append(modify(lambda x: il.rotate_right_carry(1, x, il.const(1, 1), il.flag('C'), flags='c')))
@@ -260,8 +269,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             il.append(write(0, il.const(1, 1)))
         case Op.SJMP:
             target = args[-1].const_address(data, addr)
-            target_label = address_label(il, target)
-            il.append(il.goto(target_label))
+            with_jump_dests_as_labels(il, [target], lambda target: il.append(il.goto(target)))
         case Op.SUBB:
             rhs = read(1)
             il.append(modify(lambda x: il.sub_borrow(1, x, rhs, il.flag('C'), flags='*')))
@@ -297,7 +305,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             # note that call pushes bigger address sizes than i'd want
             il.append(il.ret(il.pop(internal_addr_size)))
         case Op.JC | Op.JNC | Op.JB | Op.JBC | Op.JNB | Op.JZ | Op.JNZ:
-            il.append(cond_jump(il, inst, data, addr))
+            cond_jump(il, inst, data, addr)
         case Op.JMP:
             addr = calculate_dyn_address(il, args[-1], addr)
             il.append(il.jump(addr))
@@ -307,9 +315,8 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             is_zero = cmp_zero(il, lhs)
             not_eq_branch = inst.operands[-1].const_address(data, addr)
             eq_branch = addr
-            not_eq_branch = address_label(il, not_eq_branch)
-            eq_branch = address_label(il, eq_branch)
-            il.append(il.if_expr(is_zero, not_eq_branch, eq_branch))
+            with_jump_dests_as_labels(il, [not_eq_branch, eq_branch],
+                        lambda not_eq_branch, eq_branch: il.if_expr(is_zero, not_eq_branch, eq_branch))
         case Op.CJNE:
             lhs = read(0)
             rhs = read(1)
@@ -317,8 +324,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             il.append(il.set_flag('C', il.compare_unsigned_less_than(1, rhs, lhs)))
             not_eq_branch = inst.operands[-1].const_address(data, addr)
             eq_branch = addr
-            not_eq_branch = address_label(il, not_eq_branch)
-            eq_branch = address_label(il, eq_branch)
-            il.append(il.if_expr(not_eq, not_eq_branch, eq_branch))
+            with_jump_dests_as_labels(il, [not_eq_branch, eq_branch],
+                        lambda not_eq_branch, eq_branch: il.if_expr(not_eq, not_eq_branch, eq_branch))
     
     return inst.length

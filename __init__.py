@@ -41,9 +41,6 @@ class I8051(Architecture):
         'ov': ['OV'],
         'c': ['C'],
     }
-    flags_required_for_flag_condition = {
-        LowLevelILFlagCondition.LLFC_UGE
-    }
 
     def get_instruction_info(self, data, addr):
         instr = instructions.get_instr(data, addr)
