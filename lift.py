@@ -215,7 +215,12 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             target = il.const_pointer(internal_addr_size, code_addr(inst.operands[-1].const_address(data, addr)))
             il.append(il.call(target))
         case Op.RRC:
-            il.append(modify(lambda x: il.rotate_right_carry(1, x, il.const(1, 1), il.flag('C'), flags='c')))
+            tmp = LLIL_TEMP(0)
+            lhs = read(0)
+            carry = il.test_bit(1, lhs, il.const(1, 0))
+            il.append(il.set_reg(1, tmp, carry))
+            il.append(write(0, il.rotate_right_carry(1, lhs, il.const(1, 1), il.flag('C'))))
+            il.append(il.set_flag('C', il.reg(1, tmp)))
         case Op.MOV | Op.MOVC | Op.MOVX:
             val = read(1)
             il.append(write_operand(il, args[0], data, addr, val))
@@ -271,8 +276,17 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             target = args[-1].const_address(data, addr)
             with_jump_dests_as_labels(il, [target], lambda target: il.append(il.goto(target)))
         case Op.SUBB:
+            lhs = read(0)
             rhs = read(1)
-            il.append(modify(lambda x: il.sub_borrow(1, x, rhs, il.flag('C'), flags='*')))
+            tmp = LLIL_TEMP(0)
+            carry = il.or_expr(1,
+                il.compare_unsigned_less_than(1, lhs, rhs),
+                il.and_expr(1,
+                    il.compare_equal(1, lhs, rhs),
+                    il.flag('C')))
+            il.append(il.set_reg(1, tmp, carry))
+            il.append(write(0, il.sub_borrow(1, lhs, rhs, il.flag('C'))))
+            il.append(il.set_flag('C', il.reg(1, tmp)))
         case Op.ADD:
             rhs = read(1)
             il.append(modify(lambda x: il.add(1, x, rhs, flags='*')))
@@ -282,7 +296,12 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
         case Op.RL:
             il.append(modify(lambda x: il.rotate_left(1, x, il.const(1, 1))))
         case Op.RLC:
-            il.append(modify(lambda x: il.rotate_left_carry(1, x, il.const(1, 1), il.flag('C'), flags='c')))
+            tmp = LLIL_TEMP(0)
+            lhs = read(0)
+            carry = il.test_bit(1, lhs, il.const(1, 7))
+            il.append(il.set_reg(1, tmp, carry))
+            il.append(write(0, il.rotate_left_carry(1, lhs, il.const(1, 1), il.flag('C'))))
+            il.append(il.set_flag('C', il.reg(1, tmp)))
         case Op.XCH:
             lhs = LLIL_TEMP(0)
             il.append(il.set_reg(1, lhs, read(0)))
@@ -303,7 +322,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
             il.append(write(1, new_rhs))
         case Op.RET | Op.RETI:
             # note that call pushes bigger address sizes than i'd want
-            il.append(il.ret(il.pop(internal_addr_size)))
+            il.append(il.ret(il.pop(2)))
         case Op.JC | Op.JNC | Op.JB | Op.JBC | Op.JNB | Op.JZ | Op.JNZ:
             cond_jump(il, inst, data, addr)
         case Op.JMP:
