@@ -1,37 +1,15 @@
 from enum import Enum, auto
-from binaryninja import BranchType, InstructionInfo
+from binaryninja import BranchType, InstructionInfo, RegisterName
 from binaryninja.function import InstructionTextToken
 from binaryninja.enums import InstructionTextTokenType
+from .defs import *
+from .variation import Variation
 
 def bit_address(val: int) -> int:
     if val < 0x80:
         return 0x20 + val // 8
     else:
         return val & 0xf8
-
-# we put code_base at 0 for easy binary loading
-code_base = 0x00 << 24
-imem_base = 0x40 << 24
-sfr_base = 0x80 << 24
-xdata_base = 0xc0 << 24
-mem_mask = (1 << 24) - 1
-
-addr_mapped_registers = {
-    (imem_base + 0x00): 'R0',
-    (imem_base + 0x01): 'R1',
-    (imem_base + 0x02): 'R2',
-    (imem_base + 0x03): 'R3',
-    (imem_base + 0x04): 'R4',
-    (imem_base + 0x05): 'R5',
-    (imem_base + 0x06): 'R6',
-    (imem_base + 0x07): 'R7',
-    (sfr_base + 0x81): 'SP',
-    (sfr_base + 0x82): 'DPL',
-    (sfr_base + 0x83): 'DPH',
-    (sfr_base + 0xd0): 'PSW',
-    (sfr_base + 0xe0): 'A',
-    (sfr_base + 0xf0): 'B',
-}
 
 def code_addr(x: int) -> int:
     return code_base + x
@@ -55,10 +33,6 @@ def is_xdata(x: int) -> bool:
     return xdata_base <= x
 
 
-def reg_name(global_addr: int) -> str | None:
-    if global_addr in addr_mapped_registers:
-        return addr_mapped_registers[global_addr]
-
 class Operand(Enum):
     A = auto()
     R0 = auto()
@@ -70,6 +44,7 @@ class Operand(Enum):
     R6 = auto()
     R7 = auto()
     DPTR = auto()
+    DPTRL = auto()
     AB = auto()
     DIRECT1 = auto()
     DIRECT2 = auto()
@@ -107,7 +82,7 @@ class Operand(Enum):
             case _:
                 return 0
 
-    def const_address(self, data: bytes, addr: int) -> int | None:
+    def const_address(self, data: bytes, addr: int, var: Variation) -> int:
         op = Operand
         match self:
             case op.DIRECT1:
@@ -121,19 +96,23 @@ class Operand(Enum):
                 else:
                     return direct_addr(val & 0xf8)
             case op.ADDRESS11:
-                base = addr & -(1 << 11)
+                base = addr & -(1 << 11) & 0xffff
                 hi = data[0] >> 5 << 8
                 lo = data[1]
-                return code_addr(base | hi | lo)
+                res_addr = var.based_addr(addr, base | hi | lo)
+                return code_addr(res_addr)
             case op.ADDRESS16:
                 hi = data[1] << 8
                 lo = data[2]
-                return code_addr(hi | lo)
+                return code_addr(var.based_addr(addr, hi | lo))
             case op.OFFSET:
                 offset = data[-1] - 2 * (data[-1] & 0x80)
-                return code_addr(addr + offset)
+                res_addr = var.add_code_addr(addr, offset)
+                return code_addr(res_addr)
+            case _:
+                raise ValueError("expected an operand with address")
 
-    def immediate(self, data: bytes, addr: int) -> int | None:
+    def immediate(self, data: bytes, addr: int) -> int:
         op = Operand 
         match self:
             case op.IMMEDIATE1:
@@ -142,14 +121,19 @@ class Operand(Enum):
                 return data[2]
             case op.DPTR_IMMEDIATE:
                 return data[1] << 8 | data[2]
-    def bit(self, data: bytes, addr: int) -> int | None:
+            case _:
+                raise ValueError("expected an operand with immediate")
+
+    def bit(self, data: bytes, addr: int) -> int:
         op = Operand 
         match self:
             case op.BIT | op.COMPLEMENTED_BIT:
                 return data[1] % 8
+            case _:
+                raise ValueError("expected a bit operand")
 
 
-    def as_tokens(self, data: bytes, addr: int) -> list[InstructionTextToken]:
+    def as_tokens(self, data: bytes, addr: int, var: Variation) -> list[InstructionTextToken]:
         Opd = Operand
         def with_at(t):
             return ([InstructionTextToken(InstructionTextTokenType.BeginMemoryOperandToken, '@')] +
@@ -157,19 +141,22 @@ class Operand(Enum):
                     [InstructionTextToken(InstructionTextTokenType.EndMemoryOperandToken, '')])
 
         def addr_token():
-            a = self.const_address(data, addr)
+            a = self.const_address(data, addr, var)
             if is_code(a) or is_xdata(a):
                 return InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, f'0x{a & mem_mask:04x}', value=a)
-            if a in addr_mapped_registers:
-                return InstructionTextToken(InstructionTextTokenType.RegisterToken, addr_mapped_registers[a])
+            reg = var.register_at_address(a)
+            if reg:
+                return InstructionTextToken(InstructionTextTokenType.RegisterToken, reg)
             return InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, f'0x{a & mem_mask:02x}', value=a)
             
             
         match self:
             case Opd.A | Opd.R0 | Opd.R1 | Opd.R2 | Opd.R3 | Opd.R4 | Opd.R5 | Opd.R6 | Opd.R7:
                 return [InstructionTextToken(InstructionTextTokenType.RegisterToken, self.name)]
-            case Opd.DPTR | Opd.AB:
+            case Opd.AB:
                 return [InstructionTextToken(InstructionTextTokenType.RegisterToken, self.name)]
+            case Opd.DPTRL | Opd.DPTR:
+                return [InstructionTextToken(InstructionTextTokenType.RegisterToken, 'DPTR')]
             case Opd.DIRECT1 | Opd.DIRECT2:
                 return [addr_token()]
             case Opd.IMMEDIATE1 | Opd.IMMEDIATE2:
@@ -270,37 +257,40 @@ class Instruction:
         operands_str = ', '.join([op.name for op in self.operands])
         return (f"Instruction({self.length}, {self.operation.name}, [{operands_str}])")
 
-    def instruction_text(self, data: bytes, start_addr: int) -> list[InstructionTextToken]:
-        addr = start_addr + self.length
+    def data_addr(self, data: bytes, start_addr: int, var: Variation) -> tuple[bytes, int]:
+        addr = var.add_code_addr(start_addr, self.length)
         data = data[:self.length]
+        return (data, addr)
+
+    def instruction_text(self, data: bytes, start_addr: int, var: Variation) -> list[InstructionTextToken]:
+        (data, addr) = self.data_addr(data, start_addr, var)
         tokens = [InstructionTextToken(InstructionTextTokenType.InstructionToken, self.operation.name)]
         if self.operands:
             tokens += [InstructionTextToken(InstructionTextTokenType.TextToken, '\t')]
-            tokens += self.operands[0].as_tokens(data, addr)
+            tokens += self.operands[0].as_tokens(data, addr, var)
             for operand in self.operands[1:]:
                 tokens += [InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ', ')]
-                tokens += operand.as_tokens(data, addr)
+                tokens += operand.as_tokens(data, addr, var)
         return tokens
     
-    def instruction_info(self, data: bytes, start_addr: int):
+    def instruction_info(self, data: bytes, start_addr: int, var: Variation):
         result = InstructionInfo() 
-        addr = start_addr + self.length
-        data = data[:self.length]
+        (data, addr) = self.data_addr(data, start_addr, var)
         result.length = self.length
         match self.operation:
             case Op.RET | Op.RETI:
                 result.add_branch(branch_type=BranchType.FunctionReturn)
             case Op.LJMP | Op.AJMP | Op.SJMP:
-                target = self.operands[-1].const_address(data, addr)
+                target = self.operands[-1].const_address(data, addr, var)
                 result.add_branch(branch_type=BranchType.UnconditionalBranch, target=target)
             case Op.JMP:
                 result.add_branch(branch_type=BranchType.IndirectBranch)
             case Op.JC | Op.JNC | Op.JZ | Op.JNZ | Op.JB | Op.JNB | Op.JBC | Op.DJNZ | Op.CJNE:
                 result.add_branch(branch_type=BranchType.FalseBranch, target=start_addr + self.length)
-                target = self.operands[-1].const_address(data, addr)
+                target = self.operands[-1].const_address(data, addr, var)
                 result.add_branch(branch_type=BranchType.TrueBranch, target=target)
             case Op.LCALL | Op.ACALL:
-                target = self.operands[-1].const_address(data, addr)
+                target = self.operands[-1].const_address(data, addr, var)
                 result.add_branch(branch_type=BranchType.CallDestination, target=target)
         return result
 
@@ -451,7 +441,7 @@ instructions = [
     Instruction(2, Op.MOV, [Operand.DIRECT1, Operand.R5]),
     Instruction(2, Op.MOV, [Operand.DIRECT1, Operand.R6]),
     Instruction(2, Op.MOV, [Operand.DIRECT1, Operand.R7]),
-    Instruction(3, Op.MOV, [Operand.DPTR, Operand.DPTR_IMMEDIATE]),
+    Instruction(3, Op.MOV, [Operand.DPTRL, Operand.DPTR_IMMEDIATE]),
     Instruction(2, Op.ACALL, [Operand.ADDRESS11]),
     Instruction(2, Op.MOV, [Operand.BIT, Operand.CARRY_FLAG]),
     Instruction(1, Op.MOVC, [Operand.A, Operand.AT_A_PLUS_DPTR]),

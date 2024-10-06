@@ -2,36 +2,20 @@ from binaryninja import FlagRole, LowLevelILFlagCondition
 from binaryninja.architecture import Architecture, RegisterInfo
 from . import instructions
 from . import lift
+from . import variation
+from .defs import *
 
-class I8051(Architecture):
-    name = '8051'
-    address_size = 2
+class I8051Core(Architecture):
+    i8051_variation: variation.Variation
     default_int_size = 1
     instr_alignment = 1
     max_instr_length = 3
-    regs = {
-        'A': RegisterInfo('A', 1),
-        'B': RegisterInfo('B', 1),
-        'DPTR': RegisterInfo('DPTR', 2),
-        'DPL': RegisterInfo('DPTR', 1, 0),
-        'DPH': RegisterInfo('DPTR', 1, 1),
-        'SP': RegisterInfo('SP', 1),
-        'PSW': RegisterInfo('PSW', 1),
-        'R0': RegisterInfo('R0', 1),
-        'R1': RegisterInfo('R1', 1),
-        'R2': RegisterInfo('R2', 1),
-        'R3': RegisterInfo('R3', 1),
-        'R4': RegisterInfo('R4', 1),
-        'R5': RegisterInfo('R5', 1),
-        'R6': RegisterInfo('R6', 1),
-        'R7': RegisterInfo('R7', 1)
-    }
     stack_pointer = 'SP'
-    flags = ['C', 'AC', 'OV']
+    flags = [C, AC, OV]
     flag_roles = {
-        'C': FlagRole.CarryFlagRole,
-        'AC': FlagRole.HalfCarryFlagRole,
-        'OV': FlagRole.OverflowFlagRole,
+        C: FlagRole.CarryFlagRole,
+        AC: FlagRole.HalfCarryFlagRole,
+        OV: FlagRole.OverflowFlagRole,
     }
 
     flag_write_types = ['', '*', 'ov', 'c']
@@ -46,21 +30,60 @@ class I8051(Architecture):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        info = instr.instruction_info(data, addr)
+        info = instr.instruction_info(data, addr, self.i8051_variation)
         return info
 
     def get_instruction_text(self, data, addr):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        return instr.instruction_text(data, addr), instr.length
+        return instr.instruction_text(data, addr, self.i8051_variation), instr.length
 
     def get_instruction_low_level_il(self, data, addr, il):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        return lift.lift_instruction(il, instr, data, addr)
+        return lift.lift_instruction(il, instr, data, addr, self.i8051_variation)
 
+class I8051(I8051Core):
+    i8051_variation = variation.Variation(False, None)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
+
+class I8051Bank16K(I8051Core):
+    i8051_variation = variation.Variation(False, 0x4000)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
+
+class I8051Bank32K(I8051Core):
+    i8051_variation = variation.Variation(False, 0x8000)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
+
+class I8051XData24(I8051Core):
+    i8051_variation = variation.Variation(True, None)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
+
+class I8051XData24Bank16K(I8051Core):
+    i8051_variation = variation.Variation(True, 0x4000)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
+    
+class I8051XData24Bank32K(I8051Core):
+    i8051_variation = variation.Variation(True, 0x8000)
+    name = i8051_variation.arch_name()
+    address_size = i8051_variation.code_size()
+    regs = i8051_variation.registers()
 
 I8051.register()
-
+I8051Bank16K.register()
+I8051Bank32K.register()
+I8051XData24.register()
+I8051XData24Bank16K.register()
+I8051XData24Bank32K.register()
