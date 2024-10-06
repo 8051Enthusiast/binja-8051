@@ -3,9 +3,11 @@ from binaryninja.architecture import Architecture, RegisterInfo
 from . import instructions
 from . import lift
 from . import variation
+from . import callconv
 from .defs import *
 
 class I8051Core(Architecture):
+    name: str
     i8051_variation: variation.Variation
     default_int_size = 1
     instr_alignment = 1
@@ -81,9 +83,18 @@ class I8051XData24Bank32K(I8051Core):
     address_size = i8051_variation.code_size()
     regs = i8051_variation.registers()
 
-I8051.register()
-I8051Bank16K.register()
-I8051Bank32K.register()
-I8051XData24.register()
-I8051XData24Bank16K.register()
-I8051XData24Bank32K.register()
+def register(arch: type[I8051Core]):
+    arch.register()
+    arch_instance = Architecture[arch.name]
+    iar = callconv.IARCC(arch_instance, "IAR")
+    iar_banked = callconv.IARCC(arch_instance, "IAR-banked")
+    arch_instance.register_calling_convention(callconv.KeilCC(arch_instance, "default"))
+    arch_instance.register_calling_convention(iar)
+    arch_instance.register_calling_convention(iar_banked)
+
+register(I8051)
+register(I8051Bank16K)
+register(I8051Bank32K)
+register(I8051XData24)
+register(I8051XData24Bank16K)
+register(I8051XData24Bank32K)
