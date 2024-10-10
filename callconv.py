@@ -14,7 +14,7 @@ class IARCC(CallingConvention):
     int_arg_regs = [R1, R2, R3, R4, R5]
     int_return_reg = R1
 
-class AVRBankedCC(CallingConvention):
+class IARBankedCC(CallingConvention):
     caller_saved_regs = [R0, R1, R2, R3, R4, R5, A, B]
     callee_saved_regs = [R6, R7, DPTR]
     int_arg_regs = [R1, R2, R3, R4, R5]

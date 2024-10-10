@@ -86,11 +86,13 @@ class I8051XData24Bank32K(I8051Core):
 def register(arch: type[I8051Core]):
     arch.register()
     arch_instance = Architecture[arch.name]
+    keil = callconv.KeilCC(arch_instance, "Keil")
     iar = callconv.IARCC(arch_instance, "IAR")
-    iar_banked = callconv.IARCC(arch_instance, "IAR-banked")
-    arch_instance.register_calling_convention(callconv.KeilCC(arch_instance, "default"))
+    iar_banked = callconv.IARBankedCC(arch_instance, "IAR-banked")
+    arch_instance.register_calling_convention(keil)
     arch_instance.register_calling_convention(iar)
     arch_instance.register_calling_convention(iar_banked)
+    arch_instance.default_calling_convention = keil
 
 register(I8051)
 register(I8051Bank16K)
