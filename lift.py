@@ -221,7 +221,7 @@ def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int,
     fail = addr
 
     if negate:
-        cond = il.not_expr(1, cond)
+        cond = cmp_zero(il, cond)
 
     if inst.operation == Op.JBC:
         temp = LLIL_TEMP(1)
@@ -369,7 +369,7 @@ def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, add
         case Op.DJNZ:
             il.append(modify(lambda x: il.sub(1, x, il.const(1, 1))))
             lhs = read(0)
-            not_zero = il.not_expr(1, cmp_zero(il, lhs))
+            not_zero = il.compare_not_equal(1, lhs, il.const(1, 0))
             not_zero_branch = inst.operands[-1].const_address(data, addr, var)
             zero_branch = addr
             with_jump_dests_as_labels(il, var, [not_zero_branch, zero_branch],
