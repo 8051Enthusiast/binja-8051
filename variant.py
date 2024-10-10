@@ -25,7 +25,7 @@ DPX_ADDRESS = sfr_base + 0x93
 
 # information for the kind of 8051 derivative
 @dataclass
-class Variation:
+class Variant:
     extended_xdata: bool
     bank_size: int | None
 

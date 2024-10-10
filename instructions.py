@@ -3,7 +3,7 @@ from binaryninja import BranchType, InstructionInfo, RegisterName
 from binaryninja.function import InstructionTextToken
 from binaryninja.enums import InstructionTextTokenType
 from .defs import *
-from .variation import Variation
+from .variant import Variant
 
 def bit_address(val: int) -> int:
     if val < 0x80:
@@ -82,7 +82,7 @@ class Operand(Enum):
             case _:
                 return 0
 
-    def const_address(self, data: bytes, addr: int, var: Variation) -> int:
+    def const_address(self, data: bytes, addr: int, var: Variant) -> int:
         op = Operand
         match self:
             case op.DIRECT1:
@@ -133,7 +133,7 @@ class Operand(Enum):
                 raise ValueError("expected a bit operand")
 
 
-    def as_tokens(self, data: bytes, addr: int, var: Variation) -> list[InstructionTextToken]:
+    def as_tokens(self, data: bytes, addr: int, var: Variant) -> list[InstructionTextToken]:
         Opd = Operand
         def with_at(t):
             return ([InstructionTextToken(InstructionTextTokenType.BeginMemoryOperandToken, '@')] +
@@ -257,12 +257,12 @@ class Instruction:
         operands_str = ', '.join([op.name for op in self.operands])
         return (f"Instruction({self.length}, {self.operation.name}, [{operands_str}])")
 
-    def data_addr(self, data: bytes, start_addr: int, var: Variation) -> tuple[bytes, int]:
+    def data_addr(self, data: bytes, start_addr: int, var: Variant) -> tuple[bytes, int]:
         addr = var.add_code_addr(start_addr, self.length)
         data = data[:self.length]
         return (data, addr)
 
-    def instruction_text(self, data: bytes, start_addr: int, var: Variation) -> list[InstructionTextToken]:
+    def instruction_text(self, data: bytes, start_addr: int, var: Variant) -> list[InstructionTextToken]:
         (data, addr) = self.data_addr(data, start_addr, var)
         tokens = [InstructionTextToken(InstructionTextTokenType.InstructionToken, self.operation.name)]
         if self.operands:
@@ -273,7 +273,7 @@ class Instruction:
                 tokens += operand.as_tokens(data, addr, var)
         return tokens
     
-    def instruction_info(self, data: bytes, start_addr: int, var: Variation):
+    def instruction_info(self, data: bytes, start_addr: int, var: Variant):
         result = InstructionInfo() 
         (data, addr) = self.data_addr(data, start_addr, var)
         result.length = self.length

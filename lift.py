@@ -1,6 +1,6 @@
 from binaryninja import LLIL_TEMP, Architecture, LowLevelILLabel, RegisterName
 from .instructions import Operand as Opd, Op, Instruction, code_base, xdata_base, imem_base, sfr_base, code_addr
-from .variation import Variation
+from .variant import Variant
 from .defs import *
 from binaryninja.lowlevelil import LowLevelILFunction, ExpressionIndex
 
@@ -11,7 +11,7 @@ SP_ADDRESS = sfr_base + 0x81
 def cmp_zero(il: LowLevelILFunction, b: ExpressionIndex) -> ExpressionIndex:
     return il.compare_equal(1, b, il.const(1, 0))
 
-def read_const_address(il: LowLevelILFunction, addr: int, var: Variation) -> ExpressionIndex:
+def read_const_address(il: LowLevelILFunction, addr: int, var: Variant) -> ExpressionIndex:
     if addr == SP_ADDRESS:
         return il.sub(1, il.reg(1, SP), il.const(1, 1))
     match var.register_at_address(addr):
@@ -21,7 +21,7 @@ def read_const_address(il: LowLevelILFunction, addr: int, var: Variation) -> Exp
             return il.load(1, il.const(internal_addr_size, addr))
 
 
-def write_const_address(il: LowLevelILFunction, addr: int, var: Variation, val: ExpressionIndex) -> ExpressionIndex:
+def write_const_address(il: LowLevelILFunction, addr: int, var: Variant, val: ExpressionIndex) -> ExpressionIndex:
     if addr == SP_ADDRESS:
         val = il.add(1, val, il.const(1, 1))
         return il.set_reg(1, SP, val)
@@ -32,7 +32,7 @@ def write_const_address(il: LowLevelILFunction, addr: int, var: Variation, val: 
             return il.store(1, il.const(internal_addr_size, addr), val)
 
 
-def adjust_banked_code_address(il: LowLevelILFunction, code_addr: ExpressionIndex, pc: int, var: Variation) -> ExpressionIndex:
+def adjust_banked_code_address(il: LowLevelILFunction, code_addr: ExpressionIndex, pc: int, var: Variant) -> ExpressionIndex:
     if not var.bank_size:
         return code_addr
     (bank, _) = var.bank_and_local_addr(pc)
@@ -55,7 +55,7 @@ def adjust_banked_code_address(il: LowLevelILFunction, code_addr: ExpressionInde
     il.mark_label(merge)
     return il.reg(internal_addr_size, tmp)
 
-def calculate_dyn_address(il: LowLevelILFunction, op: Opd, pc: int, var: Variation) -> ExpressionIndex:
+def calculate_dyn_address(il: LowLevelILFunction, op: Opd, pc: int, var: Variant) -> ExpressionIndex:
     match op:
         case Opd.AT_R0:
             offset = il.reg(1, R0)
@@ -107,7 +107,7 @@ def calculate_dyn_address(il: LowLevelILFunction, op: Opd, pc: int, var: Variati
         )
             
 
-def read_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variation) -> ExpressionIndex:
+def read_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variant) -> ExpressionIndex:
     match op:
         case Opd.A | Opd.R0 | Opd.R1 | Opd.R2 | Opd.R3 | Opd.R4 | Opd.R5 | Opd.R6 | Opd.R7:
             return il.reg(1, RegisterName(op.name))
@@ -147,7 +147,7 @@ def read_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: V
         case _:
             raise ValueError(f'unknown read operand {op}')
 
-def write_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variation, val: ExpressionIndex) -> ExpressionIndex:
+def write_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variant, val: ExpressionIndex) -> ExpressionIndex:
     match op:
         case Opd.A | Opd.R0 | Opd.R1 | Opd.R2 | Opd.R3 | Opd.R4 | Opd.R5 | Opd.R6 | Opd.R7:
             return il.set_reg(1, RegisterName(op.name), val)
@@ -182,12 +182,12 @@ def write_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: 
             raise ValueError
         
 
-def modify_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variation, f) -> ExpressionIndex:
+def modify_operand(il: LowLevelILFunction, op: Opd, data: bytes, addr: int, var: Variant, f) -> ExpressionIndex:
     val = read_operand(il, op, data, addr, var)
     res = f(val)
     return write_operand(il, op, data, addr, var, res)
 
-def with_jump_dests_as_labels(il: LowLevelILFunction, var: Variation, addresses: list[int], f):
+def with_jump_dests_as_labels(il: LowLevelILFunction, var: Variant, addresses: list[int], f):
     arch = Architecture[var.arch_name()]
     unresolved_branches = []
     labels = []
@@ -204,7 +204,7 @@ def with_jump_dests_as_labels(il: LowLevelILFunction, var: Variation, addresses:
         il.mark_label(label)
         il.jump(il.const_pointer(internal_addr_size, address))
 
-def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int, var: Variation):
+def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int, var: Variant):
     match inst.operation:
         case Op.JC | Op.JNC:
             cond = il.flag(C)
@@ -232,7 +232,7 @@ def cond_jump(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int,
     with_jump_dests_as_labels(il, var, [succ, fail], lambda succ, fail: il.if_expr(cond, succ, fail))
 
 
-def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int, var: Variation):
+def lift_instruction(il: LowLevelILFunction, inst: Instruction, data: bytes, addr: int, var: Variant):
     (data, addr) = inst.data_addr(data, addr, var)
     args = inst.operands
     modify = lambda f: modify_operand(il, args[0], data, addr, var, f)

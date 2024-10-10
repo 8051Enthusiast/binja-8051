@@ -2,13 +2,13 @@ from binaryninja import FlagRole, LowLevelILFlagCondition
 from binaryninja.architecture import Architecture, RegisterInfo
 from . import instructions
 from . import lift
-from . import variation
+from . import variant
 from . import callconv
 from .defs import *
 
 class I8051Core(Architecture):
     name: str
-    i8051_variation: variation.Variation
+    i8051_variant: variant.Variant
     default_int_size = 1
     instr_alignment = 1
     max_instr_length = 3
@@ -32,56 +32,56 @@ class I8051Core(Architecture):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        info = instr.instruction_info(data, addr, self.i8051_variation)
+        info = instr.instruction_info(data, addr, self.i8051_variant)
         return info
 
     def get_instruction_text(self, data, addr):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        return instr.instruction_text(data, addr, self.i8051_variation), instr.length
+        return instr.instruction_text(data, addr, self.i8051_variant), instr.length
 
     def get_instruction_low_level_il(self, data, addr, il):
         instr = instructions.get_instr(data, addr)
         if not instr:
             return None
-        return lift.lift_instruction(il, instr, data, addr, self.i8051_variation)
+        return lift.lift_instruction(il, instr, data, addr, self.i8051_variant)
 
 class I8051(I8051Core):
-    i8051_variation = variation.Variation(False, None)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(False, None)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
 
 class I8051Bank16K(I8051Core):
-    i8051_variation = variation.Variation(False, 0x4000)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(False, 0x4000)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
 
 class I8051Bank32K(I8051Core):
-    i8051_variation = variation.Variation(False, 0x8000)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(False, 0x8000)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
 
 class I8051XData24(I8051Core):
-    i8051_variation = variation.Variation(True, None)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(True, None)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
 
 class I8051XData24Bank16K(I8051Core):
-    i8051_variation = variation.Variation(True, 0x4000)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(True, 0x4000)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
     
 class I8051XData24Bank32K(I8051Core):
-    i8051_variation = variation.Variation(True, 0x8000)
-    name = i8051_variation.arch_name()
-    address_size = i8051_variation.code_size()
-    regs = i8051_variation.registers()
+    i8051_variant = variant.Variant(True, 0x8000)
+    name = i8051_variant.arch_name()
+    address_size = i8051_variant.code_size()
+    regs = i8051_variant.registers()
 
 def register(arch: type[I8051Core]):
     arch.register()
@@ -92,7 +92,7 @@ def register(arch: type[I8051Core]):
     arch_instance.register_calling_convention(keil)
     arch_instance.register_calling_convention(iar)
     arch_instance.register_calling_convention(iar_banked)
-    arch_instance.default_calling_convention = keil
+    arch_instance.default_calling_convention = iar_banked
 
 register(I8051)
 register(I8051Bank16K)
