@@ -4,7 +4,6 @@ from .variant import Variant
 from .defs import *
 from binaryninja.lowlevelil import LowLevelILFunction, ExpressionIndex
 
-internal_addr_size = 4
 
 SP_ADDRESS = sfr_base + 0x81
 
