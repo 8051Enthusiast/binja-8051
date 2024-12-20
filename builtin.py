@@ -7,7 +7,7 @@ from .arch import REGISTERED_ARCH_NAMES
 from .defs import *
 from .variant import Variant
 
-from binaryninja import Activity, AnalysisContext, BinaryReader, BinaryView, LowLevelILCall, LowLevelILConstPtr, LowLevelILInstruction, LowLevelILJump, LowLevelILOperation
+from binaryninja import Activity, AnalysisContext, BinaryDataNotification, BinaryReader, BinaryView, LowLevelILCall, LowLevelILConstPtr, LowLevelILInstruction, LowLevelILJump, LowLevelILOperation, NotificationType, Segment
 
 hexpair = re.compile('([0-9a-fA-F]{2})')
 def as_regex(pattern: str) -> re.Pattern[bytes]:
@@ -75,8 +75,7 @@ def dispatch_and_ret_addresses(input: bytes) -> FoundAddresses:
     return FoundAddresses(dispatch, ret)
 
 def add_segment_functions(bv: BinaryView, start: int, length: int) -> FoundAddresses | None:
-    reader = BinaryReader(bv)
-    data = reader.read(length, start)
+    data = bv.read(length, start)
     if not data:
         return
     addresses = dispatch_and_ret_addresses(data)
@@ -110,6 +109,31 @@ builtin_detection_config = json.dumps({
     }
 })
 
+class BinaryModifyNotification(BinaryDataNotification):
+    activity: "BuiltinDetectionActivity"
+    def __init__(self, activity: "BuiltinDetectionActivity"):
+        super(BinaryModifyNotification, self).__init__(NotificationType.BinaryDataUpdates | NotificationType.SegmentUpdates)
+        self.received_event = False
+        self.activity = activity
+    
+    def data_inserted(self, view: BinaryView, offset: int, length: int) -> None:
+        self.activity.update_positions(view)
+
+    def data_removed(self, view: BinaryView, offset: int, length: int) -> None:
+        self.activity.update_positions(view)
+
+    def data_written(self, view: BinaryView, offset: int, length: int) -> None:
+        self.activity.update_positions(view)
+    
+    def segment_added(self, view: BinaryView, segment: Segment) -> None:
+        self.activity.update_positions(view)
+
+    def segment_removed(self, view: BinaryView, segment: Segment) -> None:
+        self.activity.update_positions(view)
+
+    def segment_updated(self, view: BinaryView, segment: Segment) -> None:
+        self.activity.update_positions(view)
+
 class BuiltinDetectionActivity(Activity):
     found_addresses: dict
     def __init__(self):
@@ -117,9 +141,14 @@ class BuiltinDetectionActivity(Activity):
         self.found_addresses = dict()
 
     def analyze_positions(self, ctx: AnalysisContext):
-        arch = ctx.view.arch
+        ctx.view.register_notification(BinaryModifyNotification(self))
+        self.update_positions(ctx.view)
+
+    def update_positions(self, view: BinaryView):
+        arch = view.arch
         if arch and arch.name in REGISTERED_ARCH_NAMES:
-            self.found_addresses[bytes(ctx.view.handle)] = add_functions(ctx.view)
+            self.found_addresses[bytes(view.handle)] = add_functions(view)
+
 
 builtin_detection = BuiltinDetectionActivity()
 
@@ -138,6 +167,8 @@ class BuiltinReplacerActivity(Activity):
         self.detector = detector
     
     def found_addresses(self, ctx: AnalysisContext):
+        if not bytes(ctx.view.handle) in self.detector.found_addresses:
+            return FoundAddresses({}, {})
         return self.detector.found_addresses[bytes(ctx.view.handle)]
     
     def replace_functions(self, ctx: AnalysisContext):
